@@ -1,0 +1,28 @@
+1) Requisitos
+
+- .NET SDK (ideal: .NET 8)
+- VS Code + extensión C# (Microsoft)
+
+Comprueba en terminal:
+
+dotnet --version
+
+2) Instalación de paquetería
+
+En terminal:
+
+cd ..ruta\OpentTK-Examples
+dotnet new console -n VentanaOpenTK
+
+Esto crea:
+
+    VentanaOpenTK/
+        VentanaOpenTK.csproj
+        Program.cs
+
+En terminal:
+
+cd VentanaOpenTK
+dotnet add package OpenTK
+
+dotnet run
