@@ -9,6 +9,9 @@
 
   <ItemGroup>
     <PackageReference Include="OpenTK" Version="4.9.4" />
+    <None Update="Shaders\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
 </Project>
