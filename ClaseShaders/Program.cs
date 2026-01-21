@@ -6,8 +6,11 @@ using OpenTK.Graphics.OpenGL4;
 
 class Game : GameWindow
 {
-    private int _vao;
-    private int _vbo;
+
+    // ID used by OpenGL.
+    private int _vao; // Vertex array object -> Cómo se leen los vértices.
+    private int _vbo; // Vertex buffer object -> Datos crudos de los vértices.
+    private int _ebo; // Element buffer object -> índices y el orden de cada vértice.
     private Shader _shader;
 
     public Game(GameWindowSettings gws, NativeWindowSettings nws) : base(gws, nws) { }
@@ -18,25 +21,51 @@ class Game : GameWindow
 
         GL.ClearColor(0.1f, 0.1f, 0.15f, 1f);
 
+        // 4 vértices pra generar un Quad
+        // Un quad no es una primitiva, sino que son 2 triángulos.
         float[] vertices =
         {
-             0.0f,  0.6f,
-            -0.6f, -0.6f,
-             0.6f, -0.6f
+            -0.5f,  0.5f,  1f, 0f, 0f,  // v0: Izq Arriba
+             0.5f,  0.5f,  0f, 1f, 0f,  // v1: Der Arriba
+            -0.5f, -0.5f,  0f, 0f, 1f,  // v2: Izq Abajo
+             0.5f, -0.5f,  1f, 1f, 0f   // v3: Der Abajo 
         };
 
+        // Determinamos el order para usar los vértices.
+        uint[] indices =
+        {
+            0, 2, 1, // T01
+            2, 3, 1  // T02
+        };
+
+
+        // Creamos los objetos de OpenGL
         _vao = GL.GenVertexArray();
         _vbo = GL.GenBuffer();
+        _ebo = GL.GenBuffer();
 
+        // Activamos el VAO.
         GL.BindVertexArray(_vao);
 
+        // Para el VBO, hacemos los "Bind" / enlaces de datos con la GOU y los shaders.
         GL.BindBuffer(BufferTarget.ArrayBuffer, _vbo);
         GL.BufferData(BufferTarget.ArrayBuffer, vertices.Length * sizeof(float), vertices, BufferUsageHint.StaticDraw);
 
-        GL.VertexAttribPointer(0, 2, VertexAttribPointerType.Float, false, 2 * sizeof(float), 0);
+        // EBO
+        // Contiene los índices de cómo leer los vértices. El EBO se guarda en el VAO.
+        GL.BindBuffer(BufferTarget.ElementArrayBuffer, _ebo);
+        GL.BufferData(BufferTarget.ElementArrayBuffer, indices.Length * sizeof(uint), indices, BufferUsageHint.StaticDraw);
+
+        // VAO sabe cómo leer el VBO
+        // Atributo 1: Posiciones
+        GL.VertexAttribPointer(0, 2, VertexAttribPointerType.Float, false, 5 * sizeof(float), 0);
         GL.EnableVertexAttribArray(0);
 
-        _shader = new Shader("Shaders/basic.vert", "Shaders/basic.frag");
+        // Atributo 2: color
+        GL.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, 5 * sizeof(float), 2 * sizeof(float));
+        GL.EnableVertexAttribArray(1);
+
+        _shader = new Shader("Shaders/vertexColor.vert", "Shaders/vertexColor.frag");
     }
 
     protected override void OnRenderFrame(FrameEventArgs e)
@@ -46,8 +75,9 @@ class Game : GameWindow
         GL.Clear(ClearBufferMask.ColorBufferBit);
 
         _shader.Use();
+        // VAO ya trae el VBO + EBO = formato
         GL.BindVertexArray(_vao);
-        GL.DrawArrays(PrimitiveType.Triangles, 0, 3);
+        GL.DrawElements(PrimitiveType.Triangles, 6, DrawElementsType.UnsignedInt, 0);
 
         SwapBuffers();
     }
@@ -55,6 +85,7 @@ class Game : GameWindow
     protected override void OnUnload()
     {
         base.OnUnload();
+        GL.DeleteBuffer(_ebo);
         GL.DeleteBuffer(_vbo);
         GL.DeleteVertexArray(_vao);
         _shader.Dispose();
