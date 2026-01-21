@@ -12,6 +12,7 @@ class Game : GameWindow
     private int _vbo; // Vertex buffer object -> Datos crudos de los vértices.
     private int _ebo; // Element buffer object -> índices y el orden de cada vértice.
     private Shader _shader;
+    private Texture _texture;
 
     public Game(GameWindowSettings gws, NativeWindowSettings nws) : base(gws, nws) { }
 
@@ -21,14 +22,13 @@ class Game : GameWindow
 
         GL.ClearColor(0.1f, 0.1f, 0.15f, 1f);
 
-        // 4 vértices pra generar un Quad
-        // Un quad no es una primitiva, sino que son 2 triángulos.
+        // 4 flotantes por vertice (x,y) & (u,v)
         float[] vertices =
         {
-            -0.5f,  0.5f,  1f, 0f, 0f,  // v0: Izq Arriba
-             0.5f,  0.5f,  0f, 1f, 0f,  // v1: Der Arriba
-            -0.5f, -0.5f,  0f, 0f, 1f,  // v2: Izq Abajo
-             0.5f, -0.5f,  1f, 1f, 0f   // v3: Der Abajo 
+            -0.5f,  0.5f,  0f, 1f,  // v0: Izq Arriba
+             0.5f,  0.5f,  1f, 1f,  // v1: Der Arriba
+            -0.5f, -0.5f,  0f, 0f,  // v2: Izq Abajo
+             0.5f, -0.5f,  1f, 0f,  // v3: Der Abajo 
         };
 
         // Determinamos el order para usar los vértices.
@@ -58,14 +58,18 @@ class Game : GameWindow
 
         // VAO sabe cómo leer el VBO
         // Atributo 1: Posiciones
-        GL.VertexAttribPointer(0, 2, VertexAttribPointerType.Float, false, 5 * sizeof(float), 0);
+        GL.VertexAttribPointer(0, 2, VertexAttribPointerType.Float, false, 4 * sizeof(float), 0);
         GL.EnableVertexAttribArray(0);
 
         // Atributo 2: color
-        GL.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, 5 * sizeof(float), 2 * sizeof(float));
+        GL.VertexAttribPointer(1, 2, VertexAttribPointerType.Float, false, 4 * sizeof(float), 2 * sizeof(float));
         GL.EnableVertexAttribArray(1);
 
-        _shader = new Shader("Shaders/vertexColor.vert", "Shaders/vertexColor.frag");
+
+        _texture = new Texture("Textures/Lenna.png");
+        _shader = new Shader("Shaders/textured.vert", "Shaders/textured.frag");
+
+
     }
 
     protected override void OnRenderFrame(FrameEventArgs e)
@@ -75,6 +79,9 @@ class Game : GameWindow
         GL.Clear(ClearBufferMask.ColorBufferBit);
 
         _shader.Use();
+        _shader.SetInt("uTex", 0);
+        _texture.Use(TextureUnit.Texture0);
+
         // VAO ya trae el VBO + EBO = formato
         GL.BindVertexArray(_vao);
         GL.DrawElements(PrimitiveType.Triangles, 6, DrawElementsType.UnsignedInt, 0);

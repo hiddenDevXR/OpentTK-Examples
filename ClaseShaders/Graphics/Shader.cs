@@ -34,6 +34,12 @@ public sealed class Shader : IDisposable
         GL.DeleteShader(fragmentShader);
     }
 
+    public void SetInt(string name, int value)
+    {
+        int loc = GL.GetUniformLocation(Handle, name);
+        GL.Uniform1(loc, value);
+    }
+
     public void Use() => GL.UseProgram(Handle);
 
     public void Dispose() => GL.DeleteProgram(Handle);
