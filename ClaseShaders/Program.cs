@@ -6,70 +6,80 @@ using OpenTK.Graphics.OpenGL4;
 
 class Game : GameWindow
 {
+    private int _vao, _vbo, _ebo;
 
-    // ID used by OpenGL.
-    private int _vao; // Vertex array object -> Cómo se leen los vértices.
-    private int _vbo; // Vertex buffer object -> Datos crudos de los vértices.
-    private int _ebo; // Element buffer object -> índices y el orden de cada vértice.
     private Shader _shader;
-    private Texture _texture;
+    private Texture _tex;
+
+    private float _time; // acumulador para animación
 
     public Game(GameWindowSettings gws, NativeWindowSettings nws) : base(gws, nws) { }
 
     protected override void OnLoad()
     {
         base.OnLoad();
+        GL.ClearColor(0.08f, 0.08f, 0.10f, 1f);
 
-        GL.ClearColor(0.1f, 0.1f, 0.15f, 1f);
-
-        // 4 flotantes por vertice (x,y) & (u,v)
+        // Quad: Pos(x,y) + UV(u,v)
         float[] vertices =
         {
-            -0.5f,  0.5f,  0f, 1f,  // v0: Izq Arriba
-             0.5f,  0.5f,  1f, 1f,  // v1: Der Arriba
-            -0.5f, -0.5f,  0f, 0f,  // v2: Izq Abajo
-             0.5f, -0.5f,  1f, 0f,  // v3: Der Abajo 
+            // x,     y,     u,    v
+            -0.5f,  0.5f,  0f,  1f, // v0 top-left
+             0.5f,  0.5f,  1f,  1f, // v1 top-right
+            -0.5f, -0.5f,  0f,  0f, // v2 bottom-left
+             0.5f, -0.5f,  1f,  0f  // v3 bottom-right
         };
 
-        // Determinamos el order para usar los vértices.
+        // 2 triángulos
         uint[] indices =
         {
-            0, 2, 1, // T01
-            2, 3, 1  // T02
+            0, 2, 1,
+            2, 3, 1
         };
 
-
-        // Creamos los objetos de OpenGL
+        // Crear buffers
         _vao = GL.GenVertexArray();
         _vbo = GL.GenBuffer();
         _ebo = GL.GenBuffer();
 
-        // Activamos el VAO.
         GL.BindVertexArray(_vao);
 
-        // Para el VBO, hacemos los "Bind" / enlaces de datos con la GOU y los shaders.
+        // VBO: datos
         GL.BindBuffer(BufferTarget.ArrayBuffer, _vbo);
         GL.BufferData(BufferTarget.ArrayBuffer, vertices.Length * sizeof(float), vertices, BufferUsageHint.StaticDraw);
 
-        // EBO
-        // Contiene los índices de cómo leer los vértices. El EBO se guarda en el VAO.
+        // EBO: índices (queda asociado al VAO)
         GL.BindBuffer(BufferTarget.ElementArrayBuffer, _ebo);
         GL.BufferData(BufferTarget.ElementArrayBuffer, indices.Length * sizeof(uint), indices, BufferUsageHint.StaticDraw);
 
-        // VAO sabe cómo leer el VBO
-        // Atributo 1: Posiciones
-        GL.VertexAttribPointer(0, 2, VertexAttribPointerType.Float, false, 4 * sizeof(float), 0);
+        // Atributos:
+        // layout(0) -> aPos (vec2)
+        // layout(1) -> aUV  (vec2)
+        int stride = 4 * sizeof(float);
+
+        GL.VertexAttribPointer(0, 2, VertexAttribPointerType.Float, false, stride, 0);
         GL.EnableVertexAttribArray(0);
 
-        // Atributo 2: color
-        GL.VertexAttribPointer(1, 2, VertexAttribPointerType.Float, false, 4 * sizeof(float), 2 * sizeof(float));
+        GL.VertexAttribPointer(1, 2, VertexAttribPointerType.Float, false, stride, 2 * sizeof(float));
         GL.EnableVertexAttribArray(1);
 
+        // Shaders (vertex con MVP)
+        _shader = new Shader("Shaders/textured_mvp.vert", "Shaders/textured.frag");
 
-        _texture = new Texture("Textures/Lenna.png");
-        _shader = new Shader("Shaders/textured.vert", "Shaders/textured.frag");
+        // Textura
+        _tex = new Texture("Textures/Lenna.png");
 
+        // Conectar sampler con Texture Unit 0
+        _shader.Use();
+        _shader.SetInt("uTex", 0);
+    }
 
+    protected override void OnUpdateFrame(FrameEventArgs e)
+    {
+        base.OnUpdateFrame(e);
+
+        // Tiempo acumulado (segundos)
+        _time += (float)e.Time;
     }
 
     protected override void OnRenderFrame(FrameEventArgs e)
@@ -78,11 +88,31 @@ class Game : GameWindow
 
         GL.Clear(ClearBufferMask.ColorBufferBit);
 
-        _shader.Use();
-        _shader.SetInt("uTex", 0);
-        _texture.Use(TextureUnit.Texture0);
+        // 1) Construir matrices
 
-        // VAO ya trae el VBO + EBO = formato
+        // Model: rotación (2D) + un poquito de escala opcional
+        var model =
+            Matrix4.CreateRotationZ(_time) *
+            Matrix4.CreateScale(0.9f);
+
+        // View: identidad (no cámara todavía)
+        var view = Matrix4.Identity;
+
+        // Projection: Ortho para 2D (encaja bien con quad en [-1,1])
+        // left, right, bottom, top, zNear, zFar
+        var proj = Matrix4.CreateOrthographicOffCenter(-1f, 1f, -1f, 1f, -1f, 1f);
+
+        // Orden típico para OpenGL: MVP = model * view * proj o proj * view * model según convención.
+        // Con esta configuración (y el shader uMVP * vec4), suele ir bien con:
+        var mvp = model * view * proj;
+
+        // 2) Enviar uniform al shader
+        _shader.Use();
+        _shader.SetMatrix4("uMVP", mvp);
+
+        // 3) Bind textura en Texture0 y dibujar
+        _tex.Use(TextureUnit.Texture0);
+
         GL.BindVertexArray(_vao);
         GL.DrawElements(PrimitiveType.Triangles, 6, DrawElementsType.UnsignedInt, 0);
 
@@ -92,9 +122,13 @@ class Game : GameWindow
     protected override void OnUnload()
     {
         base.OnUnload();
+
+        // GPU cleanup
         GL.DeleteBuffer(_ebo);
         GL.DeleteBuffer(_vbo);
         GL.DeleteVertexArray(_vao);
+
+        _tex.Dispose();
         _shader.Dispose();
     }
 }
@@ -106,7 +140,7 @@ class Program
         var gws = GameWindowSettings.Default;
         var nws = new NativeWindowSettings
         {
-            Title = "E02 - Triangle",
+            Title = "E04 - Textured Quad + MVP",
             Size = new Vector2i(800, 600),
             API = ContextAPI.OpenGL,
             APIVersion = new Version(3, 3),
