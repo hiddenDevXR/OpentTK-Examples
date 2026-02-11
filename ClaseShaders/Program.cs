@@ -1,167 +1,394 @@
-﻿using OpenTK.Windowing.Desktop;
-using OpenTK.Windowing.Common;
-using OpenTK.Graphics.OpenGL4;
-using OpenTK.Mathematics;
+﻿using System;                           // Tipos base de C# (Exception, etc.)
+using OpenTK.Mathematics;               // Matrices, vectores, MathHelper
+using OpenTK.Graphics.OpenGL4;          // Llamadas OpenGL (GL.*)
+using OpenTK.Windowing.Common;          // Tipos de eventos (FrameEventArgs, ResizeEventArgs)
+using OpenTK.Windowing.Desktop;         // GameWindow y configuración de ventana
 
-class Game : GameWindow
+// Clase estática con el punto de entrada del programa (Main)
+internal static class Program
 {
+    private static void Main()
+    {
+        // Configuración del "game loop" (frecuencias por defecto, etc.)
+        var gws = GameWindowSettings.Default;
 
-    double _accum;
+        // Configuración de la ventana y del contexto OpenGL
+        var nws = new NativeWindowSettings
+        {
+            Size = new Vector2i(900, 650),         // Tamaño de ventana en píxeles
+            Title = "Cubo 3D con Perspectiva",     // Título de la ventana
 
+            // Pide un contexto OpenGL 3.3 "Core Profile" (pipeline moderno)
+            APIVersion = new Version(3, 3),
+            Profile = ContextProfile.Core,
 
-    // Mesh: encapsula VAO/VBO/EBO y el DrawElements.
-    Mesh _mesh;
+            // ForwardCompatible: deshabilita funciones antiguas (fixed pipeline)
+            Flags = ContextFlags.ForwardCompatible
+        };
 
-    // Shader: programa de GPU (vertex + fragment).
-    Shader _shader;
+        // Crea la ventana (Game) y arranca el loop
+        using var game = new Game(gws, nws);
+        game.Run(); // Llama internamente a: OnLoad -> Update/Render en bucle -> OnUnload
+    }
+}
 
-    // Matrices del pipeline:
-    // Model: transforma el objeto (mover/rotar/escalar).
-    // View: transforma la escena según la cámara (LookAt).
-    // Projection: define la lente (perspectiva: FOV, aspect, near/far).
-    Matrix4 _model;
-    Matrix4 _view;
-    Matrix4 _projection;
+// Nuestra ventana/juego hereda de GameWindow (OpenTK maneja el loop por nosotros)
+public sealed class Game : GameWindow
+{
+    // =========================
+    // GEOMETRÍA: VÉRTICES
+    // =========================
+    // Cada vértice tiene 6 floats:
+    //  - Posición: X, Y, Z  (3 floats)
+    //  - Color:    R, G, B  (3 floats)
+    private readonly float[] _vertices =
+    {
+        // 8 vértices del cubo:
+        // X,  Y,  Z,    R,  G,  B
+        -1f, -1f,  1f,   1f, 0f, 0f,  // 0: frente-abajo-izquierda (rojo)
+         1f, -1f,  1f,   0f, 1f, 0f,  // 1: frente-abajo-derecha   (verde)
+         1f,  1f,  1f,   0f, 0f, 1f,  // 2: frente-arriba-derecha (azul)
+        -1f,  1f,  1f,   1f, 1f, 0f,  // 3: frente-arriba-izq     (amarillo)
 
-    public Game(GameWindowSettings gws, NativeWindowSettings nws) : base(gws, nws) {}
+        -1f, -1f, -1f,   1f, 0f, 1f,  // 4: atrás-abajo-izq       (magenta)
+         1f, -1f, -1f,   0f, 1f, 1f,  // 5: atrás-abajo-der       (cian)
+         1f,  1f, -1f,   1f, 1f, 1f,  // 6: atrás-arriba-der      (blanco)
+        -1f,  1f, -1f,   0f, 0f, 0f,  // 7: atrás-arriba-izq      (negro)
+    };
 
+    // =========================
+    // GEOMETRÍA: ÍNDICES
+    // =========================
+    // En vez de repetir vértices, usamos un arreglo de índices.
+    // Cada grupo de 3 índices = 1 triángulo.
+    // Un cubo: 6 caras * 2 triángulos/cara = 12 triángulos = 36 índices
+    private readonly uint[] _indices =
+    {
+        // Frente
+        0, 1, 2,  2, 3, 0,
+        // Derecha
+        1, 5, 6,  6, 2, 1,
+        // Atrás
+        5, 4, 7,  7, 6, 5,
+        // Izquierda
+        4, 0, 3,  3, 7, 4,
+        // Arriba
+        3, 2, 6,  6, 7, 3,
+        // Abajo
+        4, 5, 1,  1, 0, 4
+    };
+
+    // IDs de objetos OpenGL
+    private int _vao; // Vertex Array Object: guarda el "layout" de atributos (cómo leer el VBO)
+    private int _vbo; // Vertex Buffer Object: guarda los vértices en GPU
+    private int _ebo; // Element Buffer Object: guarda los índices en GPU
+
+    // Shader program y ubicación del uniform
+    private int _shaderProgram; // Programa linkeado (vertex + fragment)
+    private int _uMvpLocation;  // Ubicación en GPU del uniform "uMVP"
+
+    // Animación / Cámara
+    private float _angleDeg;      // Ángulo acumulado de rotación (en grados)
+    private Matrix4 _projection;  // Matriz de proyección (perspectiva)
+
+    // Constructor: llama al constructor base (GameWindow) con settings
+    public Game(GameWindowSettings gws, NativeWindowSettings nws) : base(gws, nws) { }
+
+    // =========================
+    // ONLOAD: corre UNA VEZ
+    // =========================
     protected override void OnLoad()
     {
         base.OnLoad();
 
-        // 1) Viewport: define el área donde OpenGL va a dibujar dentro de la ventana.
-        // Si no lo configuras, puedes terminar rasterizando en un área incorrecta.
-        GL.Viewport(0, 0, Size.X, Size.Y);
+        // Color con el que se limpia el buffer de color (fondo)
+        GL.ClearColor(0.08f, 0.09f, 0.12f, 1f);
 
-        // 2) Color de fondo (se usa al limpiar el framebuffer).
-        GL.ClearColor(0.1f, 0.1f, 0.1f, 1f);
+        // Habilita prueba de profundidad (Z-buffer)
+        // Sin esto, los triángulos "del fondo" se pueden dibujar encima.
+        GL.Enable(EnableCap.DepthTest);
 
-        // 3) Estado OpenGL: para este ejemplo simple desactivamos:
-        // - CullFace: evita confusiones de “cara frontal/trasera”. Vemos ambas.
-        // - DepthTest: como solo dibujamos 1 quad plano, no es necesario.
-        GL.Disable(EnableCap.CullFace);
-        GL.Disable(EnableCap.DepthTest);
+        // Genera (crea) los objetos de OpenGL y devuelve sus IDs
+        _vao = GL.GenVertexArray();
+        _vbo = GL.GenBuffer();
+        _ebo = GL.GenBuffer();
 
-        // 4) Geometría: un quad en el plano XY, centrado en el origen.
-        // Cada vértice tiene 2 floats: (x, y).
-        float[] verts =
-        {
-            // x,    y
-            -0.5f,  0.5f,  // 0: esquina superior izquierda
-             0.5f,  0.5f,  // 1: esquina superior derecha
-            -0.5f, -0.5f,  // 2: esquina inferior izquierda
-             0.5f, -0.5f   // 3: esquina inferior derecha
-        };
+        // "Bind" del VAO: a partir de aquí, la configuración de atributos queda guardada en este VAO
+        GL.BindVertexArray(_vao);
 
-        // 5) Índices: dos triángulos que forman el quad:
-        // Triángulo 1: (0, 2, 1)
-        // Triángulo 2: (2, 3, 1)
-        uint[] idx = { 0, 2, 1, 2, 3, 1 };
+        // -------------------------
+        // VBO: subir vértices a GPU
+        // -------------------------
+        GL.BindBuffer(BufferTarget.ArrayBuffer, _vbo);
 
-        // 6) Crear Mesh:
-        // stride = 2 floats por vértice (x,y) => 2 * sizeof(float)
-        // setupAttribs define cómo se leen los atributos desde el VBO.
-        _mesh = new Mesh(verts, idx, 2 * sizeof(float), () =>
-        {
-            // Atributo 0 en el vertex shader:
-            // - size = 2 (vec2)
-            // - tipo = float
-            // - stride = 2 floats
-            // - offset = 0
-            GL.VertexAttribPointer(0, 2, VertexAttribPointerType.Float, false, 2 * sizeof(float), 0);
-            GL.EnableVertexAttribArray(0);
-        });
-
-        // 7) Cargar shaders desde archivos.
-        // basic.vert debe declarar: layout(location=0) in vec2 aPos; uniform mat4 uMVP;
-        // basic.frag pinta un color sólido.
-        _shader = new Shader("Shaders/basic.vert", "Shaders/basic.frag");
-
-        // 8) Matriz Model: identidad (no transformamos el quad).
-        _model = Matrix4.Identity;
-
-        // 9) Matriz View: cámara en (0,0,5) mirando al origen.
-        // Esto crea una “cámara clásica” viendo el quad desde el eje Z positivo.
-        _view = Matrix4.LookAt(
-            new Vector3(0f, 3f, 0.1f),
-            Vector3.Zero,
-            Vector3.UnitY
+        // Copia _vertices (CPU) -> memoria en GPU (VBO)
+        GL.BufferData(
+            BufferTarget.ArrayBuffer,
+            _vertices.Length * sizeof(float),
+            _vertices,
+            BufferUsageHint.StaticDraw
         );
 
-        // 10) Matriz Projection: perspectiva.
-        // FOV: 60 grados, aspect: ancho/alto, near: 0.1, far: 100.
-        // (Near debe ser > 0 en perspectiva.)
+        // -------------------------
+        // EBO: subir índices a GPU
+        // -------------------------
+        GL.BindBuffer(BufferTarget.ElementArrayBuffer, _ebo);
+
+        // Copia _indices (CPU) -> memoria en GPU (EBO)
+        GL.BufferData(
+            BufferTarget.ElementArrayBuffer,
+            _indices.Length * sizeof(uint),
+            _indices,
+            BufferUsageHint.StaticDraw
+        );
+
+        // -------------------------
+        // Layout de atributos
+        // -------------------------
+        // Cada vértice tiene 6 floats => 6 * 4 bytes = 24 bytes por vértice
+        int stride = 6 * sizeof(float);
+
+        // Atributo 0 (location = 0 en el shader): vec3 aPos
+        // Lee 3 floats desde offset 0
+        GL.VertexAttribPointer(
+            index: 0,
+            size: 3,
+            type: VertexAttribPointerType.Float,
+            normalized: false,
+            stride: stride,
+            offset: 0
+        );
+        GL.EnableVertexAttribArray(0); // Habilita el atributo 0
+
+        // Atributo 1 (location = 1 en el shader): vec3 aColor
+        // Lee 3 floats desde offset = 3 floats (después de la posición)
+        GL.VertexAttribPointer(
+            index: 1,
+            size: 3,
+            type: VertexAttribPointerType.Float,
+            normalized: false,
+            stride: stride,
+            offset: 3 * sizeof(float)
+        );
+        GL.EnableVertexAttribArray(1); // Habilita el atributo 1
+
+        // Des-bindeamos el VAO para no modificarlo accidentalmente después
+        GL.BindVertexArray(0);
+
+        // =========================
+        // SHADERS: compilar + linkear
+        // =========================
+        _shaderProgram = CreateShaderProgram(VertexShaderSource, FragmentShaderSource);
+
+        // Obtiene la ubicación del uniform "uMVP" dentro del shader program
+        _uMvpLocation = GL.GetUniformLocation(_shaderProgram, "uMVP");
+
+        // =========================
+        // PROYECCIÓN: perspectiva
+        // =========================
         _projection = Matrix4.CreatePerspectiveFieldOfView(
-            MathHelper.DegreesToRadians(100f),
+            MathHelper.DegreesToRadians(45f),   // Campo de visión vertical (FOV)
+            Size.X / (float)Size.Y,             // Aspect ratio (ancho/alto)
+            0.1f,                                // Plano cercano (near)
+            100f                                 // Plano lejano (far)
+        );
+    }
+
+    // =========================
+    // ONRESIZE: cuando cambia tamaño
+    // =========================
+    protected override void OnResize(ResizeEventArgs e)
+    {
+        base.OnResize(e);
+
+        // Ajusta el viewport para que OpenGL dibuje en toda la ventana
+        GL.Viewport(0, 0, Size.X, Size.Y);
+
+        // Recalcula la proyección con el nuevo aspect ratio
+        _projection = Matrix4.CreatePerspectiveFieldOfView(
+            MathHelper.DegreesToRadians(45f),
             Size.X / (float)Size.Y,
             0.1f,
             100f
         );
     }
 
+    // =========================
+    // ONUPDATEFRAME: lógica (cada frame)
+    // =========================
+    protected override void OnUpdateFrame(FrameEventArgs e)
+    {
+        base.OnUpdateFrame(e);
+
+        // Aumenta el ángulo según el tiempo real transcurrido entre frames
+        // Esto hace la rotación independiente del FPS.
+        _angleDeg += 60f * (float)e.Time;
+
+        // Cierra con ESC
+        if (IsKeyDown(OpenTK.Windowing.GraphicsLibraryFramework.Keys.Escape))
+            Close();
+    }
+
+    // =========================
+    // ONRENDERFRAME: dibujado (cada frame)
+    // =========================
     protected override void OnRenderFrame(FrameEventArgs e)
     {
-        // 11) Limpiar el framebuffer (pinta el fondo con el ClearColor).
-        GL.Clear(ClearBufferMask.ColorBufferBit);
+        base.OnRenderFrame(e);
 
-        // 12) Construir la matriz final que mandamos al shader como uMVP.
-        // Importante: aquí estás usando una convención donde el vector se multiplica
-        // a la izquierda en el vertex shader (p * uMVP).
-        // Por eso el orden en CPU es: Model * View * Projection.
-        Matrix4 mvp = _model * _view * _projection;
+        // Limpia el color buffer (pantalla) y depth buffer (Z-buffer)
+        GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
 
+        // =========================
+        // MATRICES
+        // =========================
 
-        // 13) Activar el shader y subir el uniform uMVP.
-        _shader.Use();
-        _shader.SetMatrix4("uMVP", mvp);
+        // MODEL: transforma el objeto (rotaciones en X e Y)
+        var model =
+            Matrix4.CreateRotationY(MathHelper.DegreesToRadians(_angleDeg)) *
+            Matrix4.CreateRotationX(MathHelper.DegreesToRadians(_angleDeg * 0.6f));
 
+        // VIEW: simula cámara alejándose 5 unidades en Z
+        // (Mover la cámara atrás equivale a mover la escena hacia -Z)
+        var view = Matrix4.CreateTranslation(0f, 0f, -5f);
 
-_accum += e.Time;
-if (_accum >= 1.0)
-{
-    _accum = 0.0;
+        // MVP: combina Model, View, Projection en una sola matriz
+        // IMPORTANTE: El orden correcto típico con gl_Position = uMVP * vec4(pos,1)
+        // suele ser: projection * view * model
+        // Tú aquí tienes: model * view * projection (en algunos setups sale raro).
+        var mvp = model * view * _projection;
 
-    Vector4[] p =
-    {
-        new Vector4(-0.5f,  0.5f, 0f, 1f), // arriba izq
-        new Vector4( 0.5f,  0.5f, 0f, 1f), // arriba der
-        new Vector4(-0.5f, -0.5f, 0f, 1f), // abajo izq
-        new Vector4( 0.5f, -0.5f, 0f, 1f), // abajo der
-    };
+        // Activa el programa de shaders para dibujar
+        GL.UseProgram(_shaderProgram);
 
-    // TU convención actual: vec4 * mvp (vector a la izquierda)
-    Vector4 Clip(Vector4 v) => v * mvp;
+        // Sube la matriz MVP al uniform uMVP del shader
+        // transpose:false => OpenTK/GLSL usual (column-major)
+        GL.UniformMatrix4(_uMvpLocation, transpose: false, ref mvp);
 
-    Vector3 Ndc(Vector4 clip) => new Vector3(clip.X / clip.W, clip.Y / clip.W, clip.Z / clip.W);
+        // Bind del VAO (recuerda: el VAO sabe cómo leer el VBO y qué EBO usar)
+        GL.BindVertexArray(_vao);
 
-    var a = Ndc(Clip(p[0]));
-    var b = Ndc(Clip(p[1]));
-    var c = Ndc(Clip(p[2]));
-    var d = Ndc(Clip(p[3]));
+        // Dibuja usando índices (EBO) en modo triángulos
+        GL.DrawElements(
+            PrimitiveType.Triangles,
+            _indices.Length,
+            DrawElementsType.UnsignedInt,
+            0
+        );
 
-    Console.WriteLine($"TOP  : L={a.X:F3} R={b.X:F3}  width={(b.X - a.X):F3}");
-    Console.WriteLine($"BOTTOM: L={c.X:F3} R={d.X:F3}  width={(d.X - c.X):F3}");
-}
+        // Des-bindea por limpieza
+        GL.BindVertexArray(0);
 
-
-
-        // 14) Dibujar el mesh (usa su VAO y DrawElements).
-        _mesh.Draw();
-
-        // 15) Presentar el frame en pantalla.
+        // Intercambia buffers: lo dibujado pasa a pantalla
         SwapBuffers();
     }
 
-    static void Main()
+    // =========================
+    // ONUNLOAD: limpieza al cerrar
+    // =========================
+    protected override void OnUnload()
     {
-        using var g = new Game(
-            GameWindowSettings.Default,
-            new NativeWindowSettings
-            {
-                Size = new Vector2i(800, 600),
-                Title = "Quad en perspectiva (sin textura)"
-            }
-        );
-        g.Run();
+        base.OnUnload();
+
+        // Libera recursos en GPU
+        GL.DeleteBuffer(_ebo);
+        GL.DeleteBuffer(_vbo);
+        GL.DeleteVertexArray(_vao);
+
+        GL.DeleteProgram(_shaderProgram);
     }
+
+    // =========================
+    // CREA PROGRAMA DE SHADERS (compile + link)
+    // =========================
+    private static int CreateShaderProgram(string vertexSrc, string fragmentSrc)
+    {
+        // Compila cada shader (vertex y fragment)
+        int vs = CompileShader(ShaderType.VertexShader, vertexSrc);
+        int fs = CompileShader(ShaderType.FragmentShader, fragmentSrc);
+
+        // Crea un programa y adjunta shaders
+        int program = GL.CreateProgram();
+        GL.AttachShader(program, vs);
+        GL.AttachShader(program, fs);
+
+        // Link: combina ambos shaders en un único programa ejecutable por GPU
+        GL.LinkProgram(program);
+
+        // Verifica si link fue exitoso
+        GL.GetProgram(program, GetProgramParameterName.LinkStatus, out int status);
+        if (status == 0)
+        {
+            // Si falla, imprime el log (muy útil para errores de GLSL)
+            string log = GL.GetProgramInfoLog(program);
+            throw new Exception($"Error linkeando shader program:\n{log}");
+        }
+
+        // Ya linkeado: podemos separar y borrar los shaders individuales
+        GL.DetachShader(program, vs);
+        GL.DetachShader(program, fs);
+        GL.DeleteShader(vs);
+        GL.DeleteShader(fs);
+
+        return program;
+    }
+
+    // =========================
+    // COMPILA UN SHADER (vertex o fragment)
+    // =========================
+    private static int CompileShader(ShaderType type, string src)
+    {
+        // Crea objeto shader (aún vacío)
+        int shader = GL.CreateShader(type);
+
+        // Pasa el código GLSL al shader
+        GL.ShaderSource(shader, src);
+
+        // Compila el GLSL
+        GL.CompileShader(shader);
+
+        // Revisa si compiló bien
+        GL.GetShader(shader, ShaderParameter.CompileStatus, out int status);
+        if (status == 0)
+        {
+            // Si falla, muestra el error de compilación de GLSL
+            string log = GL.GetShaderInfoLog(shader);
+            throw new Exception($"Error compilando {type}:\n{log}");
+        }
+
+        return shader;
+    }
+
+    // =========================
+    // VERTEX SHADER (GLSL)
+    // =========================
+    private const string VertexShaderSource = @"
+#version 330 core
+layout(location = 0) in vec3 aPos;     
+layout(location = 1) in vec3 aColor;   
+
+uniform mat4 uMVP;                     
+
+out vec3 vColor;                       
+
+void main()
+{
+    vColor = aColor;                   
+    gl_Position = uMVP * vec4(aPos, 1.0);
+}
+";
+
+    // =========================
+    // FRAGMENT SHADER (GLSL)
+    // =========================
+    private const string FragmentShaderSource = @"
+#version 330 core
+in vec3 vColor;                        
+out vec4 FragColor;                    
+
+void main()
+{
+    FragColor = vec4(vColor, 1.0);     
+}
+";
 }
