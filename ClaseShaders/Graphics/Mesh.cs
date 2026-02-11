@@ -33,7 +33,7 @@ public sealed class Mesh : IDisposable
             BufferUsageHint.StaticDraw
         );
 
-        // 🔴 GARANTIZAR VBO ACTIVO para los atributos
+        // GARANTIZAR VBO ACTIVO para los atributos
         GL.BindBuffer(BufferTarget.ArrayBuffer, _vbo);
 
         // Atributos (capturan estado del VAO)

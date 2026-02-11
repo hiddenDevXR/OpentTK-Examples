@@ -5,6 +5,10 @@ using OpenTK.Mathematics;
 
 class Game : GameWindow
 {
+
+    double _accum;
+
+
     // Mesh: encapsula VAO/VBO/EBO y el DrawElements.
     Mesh _mesh;
 
@@ -79,7 +83,7 @@ class Game : GameWindow
         // 9) Matriz View: cámara en (0,0,5) mirando al origen.
         // Esto crea una “cámara clásica” viendo el quad desde el eje Z positivo.
         _view = Matrix4.LookAt(
-            new Vector3(0, 0, 5),
+            new Vector3(0f, 3f, 0.1f),
             Vector3.Zero,
             Vector3.UnitY
         );
@@ -88,7 +92,7 @@ class Game : GameWindow
         // FOV: 60 grados, aspect: ancho/alto, near: 0.1, far: 100.
         // (Near debe ser > 0 en perspectiva.)
         _projection = Matrix4.CreatePerspectiveFieldOfView(
-            MathHelper.DegreesToRadians(60f),
+            MathHelper.DegreesToRadians(100f),
             Size.X / (float)Size.Y,
             0.1f,
             100f
@@ -106,9 +110,40 @@ class Game : GameWindow
         // Por eso el orden en CPU es: Model * View * Projection.
         Matrix4 mvp = _model * _view * _projection;
 
+
         // 13) Activar el shader y subir el uniform uMVP.
         _shader.Use();
         _shader.SetMatrix4("uMVP", mvp);
+
+
+_accum += e.Time;
+if (_accum >= 1.0)
+{
+    _accum = 0.0;
+
+    Vector4[] p =
+    {
+        new Vector4(-0.5f,  0.5f, 0f, 1f), // arriba izq
+        new Vector4( 0.5f,  0.5f, 0f, 1f), // arriba der
+        new Vector4(-0.5f, -0.5f, 0f, 1f), // abajo izq
+        new Vector4( 0.5f, -0.5f, 0f, 1f), // abajo der
+    };
+
+    // TU convención actual: vec4 * mvp (vector a la izquierda)
+    Vector4 Clip(Vector4 v) => v * mvp;
+
+    Vector3 Ndc(Vector4 clip) => new Vector3(clip.X / clip.W, clip.Y / clip.W, clip.Z / clip.W);
+
+    var a = Ndc(Clip(p[0]));
+    var b = Ndc(Clip(p[1]));
+    var c = Ndc(Clip(p[2]));
+    var d = Ndc(Clip(p[3]));
+
+    Console.WriteLine($"TOP  : L={a.X:F3} R={b.X:F3}  width={(b.X - a.X):F3}");
+    Console.WriteLine($"BOTTOM: L={c.X:F3} R={d.X:F3}  width={(d.X - c.X):F3}");
+}
+
+
 
         // 14) Dibujar el mesh (usa su VAO y DrawElements).
         _mesh.Draw();
