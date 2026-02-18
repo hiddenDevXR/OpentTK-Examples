@@ -3,6 +3,8 @@ using OpenTK.Mathematics;
 using OpenTK.Graphics.OpenGL4;
 using OpenTK.Windowing.Common;
 using OpenTK.Windowing.Desktop;
+using OpenTK.Windowing.GraphicsLibraryFramework;
+
 
 // =========================
 // ENTRY POINT
@@ -27,93 +29,98 @@ internal static class Program
     }
 }
 
-// =========================
-// GAME WINDOW
-// =========================
+
 public sealed class Game : GameWindow
 {
-    // =========================
-    // GEOMETRÍA
-    // =========================
-    private readonly float[] _vertices =
-    {
-        // 8 vértices del cubo:
-        // X,  Y,  Z,    R,  G,  B
-        -1f, -1f,  1f,   1f, 0f, 0f,  // 0
-         1f, -1f,  1f,   0f, 1f, 0f,  // 1
-         1f,  1f,  1f,   0f, 0f, 1f,  // 2
-        -1f,  1f,  1f,   1f, 1f, 0f,  // 3
+    // Layout por vértice: pos(3), normal(3), tangent(3), uv(2) = 11 floats
 
-        -1f, -1f, -1f,   1f, 0f, 1f,  // 4
-         1f, -1f, -1f,   0f, 1f, 1f,  // 5
-         1f,  1f, -1f,   1f, 1f, 1f,  // 6
-        -1f,  1f, -1f,   0f, 0f, 0f,  // 7
+    private static readonly float[] CubeVertices =
+    {
+        // +Z (Front) normal (0,0,1), tangent (1,0,0)
+        -1, -1,  1,   0, 0, 1,   1, 0, 0,   0, 0,
+         1, -1,  1,   0, 0, 1,   1, 0, 0,   1, 0,
+         1,  1,  1,   0, 0, 1,   1, 0, 0,   1, 1,
+        -1,  1,  1,   0, 0, 1,   1, 0, 0,   0, 1,
+
+        // +X (Right) normal (1,0,0), tangent (0,0,-1)
+         1, -1,  1,   1, 0, 0,   0, 0,-1,   0, 0,
+         1, -1, -1,   1, 0, 0,   0, 0,-1,   1, 0,
+         1,  1, -1,   1, 0, 0,   0, 0,-1,   1, 1,
+         1,  1,  1,   1, 0, 0,   0, 0,-1,   0, 1,
+
+        // -Z (Back) normal (0,0,-1), tangent (-1,0,0)
+         1, -1, -1,   0, 0,-1,  -1, 0, 0,   0, 0,
+        -1, -1, -1,   0, 0,-1,  -1, 0, 0,   1, 0,
+        -1,  1, -1,   0, 0,-1,  -1, 0, 0,   1, 1,
+         1,  1, -1,   0, 0,-1,  -1, 0, 0,   0, 1,
+
+        // -X (Left) normal (-1,0,0), tangent (0,0,1)
+        -1, -1, -1,  -1, 0, 0,   0, 0, 1,   0, 0,
+        -1, -1,  1,  -1, 0, 0,   0, 0, 1,   1, 0,
+        -1,  1,  1,  -1, 0, 0,   0, 0, 1,   1, 1,
+        -1,  1, -1,  -1, 0, 0,   0, 0, 1,   0, 1,
+
+        // +Y (Top) normal (0,1,0), tangent (1,0,0)
+        -1,  1,  1,   0, 1, 0,   1, 0, 0,   0, 0,
+         1,  1,  1,   0, 1, 0,   1, 0, 0,   1, 0,
+         1,  1, -1,   0, 1, 0,   1, 0, 0,   1, 1,
+        -1,  1, -1,   0, 1, 0,   1, 0, 0,   0, 1,
+
+        // -Y (Bottom) normal (0,-1,0), tangent (1,0,0)
+        -1, -1, -1,   0,-1, 0,   1, 0, 0,   0, 0,
+         1, -1, -1,   0,-1, 0,   1, 0, 0,   1, 0,
+         1, -1,  1,   0,-1, 0,   1, 0, 0,   1, 1,
+        -1, -1,  1,   0,-1, 0,   1, 0, 0,   0, 1,
     };
 
-    private readonly uint[] _indices =
+    private static readonly uint[] CubeIndices =
     {
-        // Frente
-        0, 1, 2,  2, 3, 0,
-        // Derecha
-        1, 5, 6,  6, 2, 1,
-        // Atrás
-        5, 4, 7,  7, 6, 5,
-        // Izquierda
-        4, 0, 3,  3, 7, 4,
-        // Arriba
-        3, 2, 6,  6, 7, 3,
-        // Abajo
-        4, 5, 1,  1, 0, 4
+        0, 1, 2,  2, 3, 0,        // front
+        4, 5, 6,  6, 7, 4,        // right
+        8, 9,10, 10,11, 8,        // back
+       12,13,14, 14,15,12,        // left
+       16,17,18, 18,19,16,        // top
+       20,21,22, 22,23,20         // bottom
     };
 
-    // =========================
-    // OBJETOS "ALTOS"
-    // =========================
     private Mesh _cube;
     private Shader _shader;
 
-    // =========================
-    // CÁMARA / ANIM
-    // =========================
+    private int _texDiffuse;
+    private int _texNormal;
+
     private float _angleDeg;
     private Matrix4 _projection;
 
     public Game(GameWindowSettings gws, NativeWindowSettings nws) : base(gws, nws) { }
 
-    // =========================
-    // ONLOAD
-    // =========================
     protected override void OnLoad()
     {
         base.OnLoad();
 
         GL.ClearColor(0.08f, 0.09f, 0.12f, 1f);
         GL.Enable(EnableCap.DepthTest);
-
-        // Por si acaso (además OnResize)
         GL.Viewport(0, 0, Size.X, Size.Y);
 
-        // Crea Mesh (layout: pos+color => 6 floats)
-        _cube = new Mesh(_vertices, _indices, strideBytes: 6 * sizeof(float));
+        _cube = new Mesh(CubeVertices, CubeIndices);
 
-        // Crea Shader
+        string baseDir = AppContext.BaseDirectory;
+
         _shader = new Shader(
-    "Shaders/basic.vert",
-    "Shaders/basic.frag"
-);
+            Path.Combine(baseDir, "Shaders", "lit_normal.vert"),
+            Path.Combine(baseDir, "Shaders", "lit_normal.frag")
+        );
 
-        // Proyección inicial
+        _texDiffuse = Texture.Load2D(Path.Combine(baseDir, "Textures", "castle_diff.jpg"), srgb: true);
+        _texNormal  = Texture.Load2D(Path.Combine(baseDir, "Textures", "castle_nor_gl.png"),  srgb: false);
+
         _projection = Matrix4.CreatePerspectiveFieldOfView(
             MathHelper.DegreesToRadians(45f),
             Size.X / (float)Size.Y,
-            0.1f,
-            100f
+            0.1f, 100f
         );
     }
 
-    // =========================
-    // ONRESIZE
-    // =========================
     protected override void OnResize(ResizeEventArgs e)
     {
         base.OnResize(e);
@@ -123,58 +130,65 @@ public sealed class Game : GameWindow
         _projection = Matrix4.CreatePerspectiveFieldOfView(
             MathHelper.DegreesToRadians(45f),
             Size.X / (float)Size.Y,
-            0.1f,
-            100f
+            0.1f, 100f
         );
     }
 
-    // =========================
-    // UPDATE
-    // =========================
     protected override void OnUpdateFrame(FrameEventArgs e)
     {
         base.OnUpdateFrame(e);
 
         _angleDeg += 60f * (float)e.Time;
 
-        if (IsKeyDown(OpenTK.Windowing.GraphicsLibraryFramework.Keys.Escape))
+        if (KeyboardState.IsKeyDown(Keys.Escape))
             Close();
     }
 
-    // =========================
-    // RENDER
-    // =========================
     protected override void OnRenderFrame(FrameEventArgs e)
     {
         base.OnRenderFrame(e);
 
         GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
 
-        // Model
         var model =
             Matrix4.CreateRotationY(MathHelper.DegreesToRadians(_angleDeg)) *
             Matrix4.CreateRotationX(MathHelper.DegreesToRadians(_angleDeg * 0.6f));
 
-        // View
-        var view = Matrix4.CreateTranslation(0f, 0f, -5f);
-
-        // Mantén tu convención actual (porque dices que así te funciona)
-        var mvp = model * view * _projection;
+        var view = Matrix4.LookAt(new Vector3(0, 0, 5), Vector3.Zero, Vector3.UnitY);
 
         _shader.Use();
-        _shader.SetMatrix4("uMVP", mvp, transpose: false);
+
+        // Matrices (shader: uProj * uView * uModel)
+        _shader.SetMatrix4("uModel", model);
+        _shader.SetMatrix4("uView", view);
+        _shader.SetMatrix4("uProj", _projection);
+
+        // Luz direccional
+        _shader.SetVector3("uLightDir", Vector3.Normalize(new Vector3(0.4f, 1.0f, 0.2f)));
+        _shader.SetVector3("uLightColor", new Vector3(1f, 1f, 1f));
+        _shader.SetVector3("uBaseColor", new Vector3(1f, 1f, 1f));
+        _shader.SetFloat("uAmbient", 0.20f);
+
+        // Texturas
+        GL.ActiveTexture(TextureUnit.Texture0);
+        GL.BindTexture(TextureTarget.Texture2D, _texDiffuse);
+        _shader.SetInt("uDiffuse", 0);
+
+        GL.ActiveTexture(TextureUnit.Texture1);
+        GL.BindTexture(TextureTarget.Texture2D, _texNormal);
+        _shader.SetInt("uNormalMap", 1);
 
         _cube.Draw();
 
         SwapBuffers();
     }
 
-    // =========================
-    // UNLOAD
-    // =========================
     protected override void OnUnload()
     {
         base.OnUnload();
+
+        if (_texDiffuse != 0) GL.DeleteTexture(_texDiffuse);
+        if (_texNormal  != 0) GL.DeleteTexture(_texNormal);
 
         _cube?.Dispose();
         _shader?.Dispose();
