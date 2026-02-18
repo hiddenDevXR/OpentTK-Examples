@@ -8,7 +8,7 @@ public sealed class Mesh : IDisposable
     private readonly int _ebo;
     private readonly int _indexCount;
 
-    public Mesh(float[] vertices, uint[] indices, int vertexStrideBytes, Action configureAttributes)
+    public Mesh(float[] vertices, uint[] indices, int strideBytes)
     {
         _indexCount = indices.Length;
 
@@ -24,8 +24,14 @@ public sealed class Mesh : IDisposable
         GL.BindBuffer(BufferTarget.ElementArrayBuffer, _ebo);
         GL.BufferData(BufferTarget.ElementArrayBuffer, indices.Length * sizeof(uint), indices, BufferUsageHint.StaticDraw);
 
-        // El caller define VertexAttribPointer(s)
-        configureAttributes();
+        // Layout fijo para tu caso actual:
+        // location 0: vec3 pos (offset 0)
+        // location 1: vec3 color (offset 12 bytes)
+        GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, strideBytes, 0);
+        GL.EnableVertexAttribArray(0);
+
+        GL.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, strideBytes, 3 * sizeof(float));
+        GL.EnableVertexAttribArray(1);
 
         GL.BindVertexArray(0);
     }
@@ -42,5 +48,6 @@ public sealed class Mesh : IDisposable
         GL.DeleteBuffer(_ebo);
         GL.DeleteBuffer(_vbo);
         GL.DeleteVertexArray(_vao);
+        GC.SuppressFinalize(this);
     }
 }
