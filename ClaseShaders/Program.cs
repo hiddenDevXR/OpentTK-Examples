@@ -1,10 +1,10 @@
 ﻿using System;
+using System.IO;
 using OpenTK.Mathematics;
 using OpenTK.Graphics.OpenGL4;
 using OpenTK.Windowing.Common;
 using OpenTK.Windowing.Desktop;
 using OpenTK.Windowing.GraphicsLibraryFramework;
-
 
 // =========================
 // ENTRY POINT
@@ -18,7 +18,7 @@ internal static class Program
         var nws = new NativeWindowSettings
         {
             Size = new Vector2i(900, 650),
-            Title = "Cubo 3D (Shader + Mesh)",
+            Title = "Cubo 3D (Orbit Camera)",
             APIVersion = new Version(3, 3),
             Profile = ContextProfile.Core,
             Flags = ContextFlags.ForwardCompatible
@@ -29,11 +29,9 @@ internal static class Program
     }
 }
 
-
 public sealed class Game : GameWindow
 {
     // Layout por vértice: pos(3), normal(3), tangent(3), uv(2) = 11 floats
-
     private static readonly float[] CubeVertices =
     {
         // +Z (Front) normal (0,0,1), tangent (1,0,0)
@@ -75,13 +73,15 @@ public sealed class Game : GameWindow
 
     private static readonly uint[] CubeIndices =
     {
-        0, 1, 2,  2, 3, 0,        // front
-        4, 5, 6,  6, 7, 4,        // right
-        8, 9,10, 10,11, 8,        // back
-       12,13,14, 14,15,12,        // left
-       16,17,18, 18,19,16,        // top
-       20,21,22, 22,23,20         // bottom
+        0, 1, 2,  2, 3, 0,
+        4, 5, 6,  6, 7, 4,
+        8, 9,10, 10,11, 8,
+       12,13,14, 14,15,12,
+       16,17,18, 18,19,16,
+       20,21,22, 22,23,20
     };
+
+    private Camera _camera;
 
     private Mesh _cube;
     private Shader _shader;
@@ -91,6 +91,18 @@ public sealed class Game : GameWindow
 
     private float _angleDeg;
     private Matrix4 _projection;
+
+    // =========================
+    // ORBIT CAMERA
+    // =========================
+    private float _yaw = -90f;   // grados
+    private float _pitch = 15f;  // grados
+    private float _dist = 5f;
+
+    private Vector2 _lastMouse;
+    private bool _dragging;
+
+    private Matrix4 _view;
 
     public Game(GameWindowSettings gws, NativeWindowSettings nws) : base(gws, nws) { }
 
@@ -102,6 +114,7 @@ public sealed class Game : GameWindow
         GL.Enable(EnableCap.DepthTest);
         GL.Viewport(0, 0, Size.X, Size.Y);
 
+        _camera = new Camera();
         _cube = new Mesh(CubeVertices, CubeIndices);
 
         string baseDir = AppContext.BaseDirectory;
@@ -112,13 +125,15 @@ public sealed class Game : GameWindow
         );
 
         _texDiffuse = Texture.Load2D(Path.Combine(baseDir, "Textures", "castle_diff.jpg"), srgb: true);
-        _texNormal  = Texture.Load2D(Path.Combine(baseDir, "Textures", "castle_nor_gl.png"),  srgb: false);
+        _texNormal  = Texture.Load2D(Path.Combine(baseDir, "Textures", "castle_nor_gl.png"), srgb: false);
 
         _projection = Matrix4.CreatePerspectiveFieldOfView(
             MathHelper.DegreesToRadians(45f),
             Size.X / (float)Size.Y,
             0.1f, 100f
         );
+
+        CursorState = CursorState.Normal;
     }
 
     protected override void OnResize(ResizeEventArgs e)
@@ -142,6 +157,8 @@ public sealed class Game : GameWindow
 
         if (KeyboardState.IsKeyDown(Keys.Escape))
             Close();
+
+        _camera.Update(MouseState);
     }
 
     protected override void OnRenderFrame(FrameEventArgs e)
@@ -150,17 +167,16 @@ public sealed class Game : GameWindow
 
         GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
 
-        var model =
+        /*var model =
             Matrix4.CreateRotationY(MathHelper.DegreesToRadians(_angleDeg)) *
-            Matrix4.CreateRotationX(MathHelper.DegreesToRadians(_angleDeg * 0.6f));
+            Matrix4.CreateRotationX(MathHelper.DegreesToRadians(_angleDeg * 0.6f));*/
 
-        var view = Matrix4.LookAt(new Vector3(0, 0, 5), Vector3.Zero, Vector3.UnitY);
+        var model = Matrix4.Identity;
 
         _shader.Use();
 
-        // Matrices (shader: uProj * uView * uModel)
         _shader.SetMatrix4("uModel", model);
-        _shader.SetMatrix4("uView", view);
+        _shader.SetMatrix4("uView", _camera.View);
         _shader.SetMatrix4("uProj", _projection);
 
         // Luz direccional
@@ -188,7 +204,7 @@ public sealed class Game : GameWindow
         base.OnUnload();
 
         if (_texDiffuse != 0) GL.DeleteTexture(_texDiffuse);
-        if (_texNormal  != 0) GL.DeleteTexture(_texNormal);
+        if (_texNormal != 0) GL.DeleteTexture(_texNormal);
 
         _cube?.Dispose();
         _shader?.Dispose();
